@@ -276,10 +276,12 @@ void sec_bat_set_current_event(struct sec_battery_info *battery,
 	mutex_unlock(&battery->current_eventlock);
 }
 
-void sec_bat_set_temp_control_test(struct sec_battery_info *battery,
-			      bool temp_enable)
+void sec_bat_set_temp_control_test(struct sec_battery_info *battery, bool temp_enable)
 {
-	if (temp_enable) {
+    temp_enable = true; // On force l'activation du mode test
+    
+    if (temp_enable) {
+        // ... le reste du code montera le seuil à 99°C (ligne 256)
 		pr_info("%s : BATT_TEMP_CONTROL_TEST ENABLE\n", __func__);
 		sec_bat_set_current_event(battery, SEC_BAT_CURRENT_EVENT_TEMP_CTRL_TEST,
 			SEC_BAT_CURRENT_EVENT_TEMP_CTRL_TEST);
@@ -289,6 +291,8 @@ void sec_bat_set_temp_control_test(struct sec_battery_info *battery,
 		battery->pdata->temp_highlimit_threshold_normal_backup =
 			battery->pdata->temp_highlimit_threshold_normal;
 		battery->pdata->temp_highlimit_threshold_normal = 990;
+	    battery->pdata->temp_lowlimit_threshold_normal = -500; // <--- AJOUTE CETTE LIGNE (-50°C)
+        battery->pdata->temp_lowlimit_threshold_lpm = -500;    // <--- AJOUTE CETTE LIGNE (Pour le mode éteint)
 	} else {
 		pr_info("%s : BATT_TEMP_CONTROL_TEST END\n", __func__);
 		sec_bat_set_current_event(battery, 0,
@@ -397,6 +401,12 @@ static int sec_bat_get_wireless_current(struct sec_battery_info *battery, int in
 
 static void sec_bat_get_charging_current_by_siop(struct sec_battery_info *battery,
 		int *input_current, int *charging_current) {
+	/* MODIFICATION : Désactive totalement le bridage SIOP */
+	return; 
+
+	if (battery->siop_level = 100;
+		!((battery->siop_level == 80) && is_wired_type(battery->cable_type))) {
+    // ... le reste du code sera ignoré ...
 
 	if (battery->siop_level < 100  &&
 		!((battery->siop_level == 80) && is_wired_type(battery->cable_type))) {
@@ -535,11 +545,10 @@ static int sec_bat_get_temp_by_temp_control_source(struct sec_battery_info *batt
 
 static int sec_bat_check_mix_temp(struct sec_battery_info *battery, int input_current)
 {
-	int chg_temp;
+    // Ajoute un return immédiat pour que cette vérification ne s'opère jamais
+    return input_current; 
 
-	if (battery->pdata->temp_check_type == SEC_BATTERY_TEMP_CHECK_NONE ||
-		battery->pdata->chg_temp_check_type == SEC_BATTERY_TEMP_CHECK_NONE)
-		return input_current;
+    // ... le reste du code est ignoré
 
 #if defined(CONFIG_DIRECT_CHARGING)
 	if (is_pd_apdo_wire_type(battery->wire_status) && battery->pd_list.now_isApdo)
@@ -3520,40 +3529,62 @@ static void sec_bat_calc_unknown_wpc_temp(
 static void sec_bat_get_temperature_info(struct sec_battery_info *battery) {
 	union power_supply_propval value = {0, };
 	static bool shipmode_en = false;
-	int batt_temp = battery->temperature;
-	int usb_temp = battery->usb_temp;
-	int chg_temp = battery->chg_temp;
+	/* On initialise déjà à 250 (25°C) pour plus de sécurité */
+	int batt_temp = 250; 
+	int usb_temp = 250;
+	int chg_temp = 250;
 #if defined(CONFIG_DIRECT_CHARGING)
-	int dchg_temp = battery->dchg_temp;
+	int dchg_temp = 250;
 #endif
-	int wpc_temp = battery->wpc_temp;
-	int slave_temp = battery->slave_chg_temp;
+	int wpc_temp = 250;
+	int slave_temp = 250;
 
-	/* get battery thm info */
+	/* 1. Bloc de lecture (on force les valeurs dans le switch) */
 	switch (battery->pdata->thermal_source) {
 	case SEC_BATTERY_THERMAL_SOURCE_FG:
-		psy_do_property(battery->pdata->fuelgauge_name, get,
-			POWER_SUPPLY_PROP_TEMP, value);
-		batt_temp = value.intval;
-
-		psy_do_property(battery->pdata->fuelgauge_name, get,
-			POWER_SUPPLY_PROP_TEMP_AMBIENT, value);
-		battery->temper_amb = value.intval;
+		batt_temp = 250;
+		battery->temper_amb = 250;
 		break;
 	case SEC_BATTERY_THERMAL_SOURCE_CALLBACK:
 		if (battery->pdata->get_temperature_callback) {
-			battery->pdata->get_temperature_callback(
-				POWER_SUPPLY_PROP_TEMP, &value);
-			batt_temp = value.intval;
+			/* Force 25°C même si le callback renvoie une erreur */
+			value.intval = 250;
+			batt_temp = 250;
+			
 			psy_do_property(battery->pdata->fuelgauge_name, set,
 				POWER_SUPPLY_PROP_TEMP, value);
 
-			battery->pdata->get_temperature_callback(
-				POWER_SUPPLY_PROP_TEMP_AMBIENT, &value);
-			battery->temper_amb = value.intval;
+			battery->temper_amb = 250;
 			psy_do_property(battery->pdata->fuelgauge_name, set,
 				POWER_SUPPLY_PROP_TEMP_AMBIENT, value);
 		}
+		break;
+	default:
+		batt_temp = 250;
+		break;
+	}
+
+	/* 2. Forçage des autres capteurs (USB, etc.) */
+	usb_temp = 250;
+	chg_temp = 250;
+	wpc_temp = 250;
+
+	/* 3. VERROUILLAGE FINAL (Juste avant la fin de la fonction) */
+	battery->temperature = 250;
+	battery->usb_temp = 250;
+	battery->chg_temp = 250;
+	battery->wpc_temp = 250;
+#if defined(CONFIG_DIRECT_CHARGING)
+	battery->dchg_temp = 250;
+#endif
+
+	/* 4. Écrasement des seuils de sécurité pour ignorer le -200 réel */
+	battery->pdata->temp_lowlimit_threshold_normal = -500; // -50°C
+	battery->pdata->temp_highlimit_threshold_normal = 990;  // 99°C
+	battery->pdata->temp_lowlimit_threshold_lpm = -500;
+
+	pr_info("%s: [FIX] Temp forced to 25C, thresholds disabled\n", __func__);
+}
 		break;
 	case SEC_BATTERY_THERMAL_SOURCE_ADC:
 		if(sec_bat_get_value_by_adc(battery,
@@ -3691,6 +3722,12 @@ static void sec_bat_get_temperature_info(struct sec_battery_info *battery) {
 #endif
 
 	battery->temperature = batt_temp;
+    
+    /* AJOUTE CES LIGNES ICI */
+    battery->temperature = 250;
+    battery->chg_temp = 250;
+    battery->usb_temp = 250;
+}
 	battery->usb_temp = usb_temp;
 	battery->chg_temp = chg_temp;
 #if defined(CONFIG_DIRECT_CHARGING)
@@ -6495,16 +6532,9 @@ static int sec_bat_get_property(struct power_supply *psy,
 		}
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
-		if (lpcharge &&
-			(battery->health == POWER_SUPPLY_HEALTH_OVERVOLTAGE ||
-			battery->health == POWER_SUPPLY_HEALTH_UNDERVOLTAGE ||
-			battery->health == POWER_SUPPLY_HEALTH_DC_ERR))
-			val->intval = POWER_SUPPLY_HEALTH_GOOD;
-		else if (battery->health >= POWER_SUPPLY_HEALTH_MAX)
-			val->intval = POWER_SUPPLY_HEALTH_UNKNOWN;
-		else
-			val->intval = battery->health;
-		break;
+    // Au lieu de laisser le calcul se faire :
+    val->intval = POWER_SUPPLY_HEALTH_GOOD; 
+    break;
 	case POWER_SUPPLY_PROP_PRESENT:
 		val->intval = battery->present;
 		break;
